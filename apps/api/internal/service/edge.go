@@ -9,10 +9,10 @@ import (
 )
 
 type EdgeService struct {
-	edgeRepo *repository.EdgeRepository
+	edgeRepo repository.EdgeRepository
 }
 
-func NewEdgeService(edgeRepo *repository.EdgeRepository) *EdgeService {
+func NewEdgeService(edgeRepo repository.EdgeRepository) *EdgeService {
 	return &EdgeService{edgeRepo: edgeRepo}
 }
 

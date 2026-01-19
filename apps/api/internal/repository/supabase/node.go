@@ -1,4 +1,4 @@
-package repository
+package supabase
 
 import (
 	"context"
@@ -7,19 +7,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/mokuhyo-driven-test/api/internal/model"
+	"github.com/mokuhyo-driven-test/api/internal/repository"
 )
 
-type NodeRepository struct {
-	db *DB
+// nodeRepository はノードリポジトリのSupabase実装です
+type nodeRepository struct {
+	db repository.DBInterface
 }
 
-func NewNodeRepository(db *DB) *NodeRepository {
-	return &NodeRepository{db: db}
+// NewNodeRepository は新しいノードリポジトリを作成します
+func NewNodeRepository(db repository.DBInterface) repository.NodeRepository {
+	return &nodeRepository{db: db}
 }
 
-func (r *NodeRepository) Create(ctx context.Context, projectID uuid.UUID, content string) (*model.Node, error) {
+func (r *nodeRepository) Create(ctx context.Context, projectID uuid.UUID, content string) (*model.Node, error) {
 	var node model.Node
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO nodes (project_id, content)
 		VALUES ($1, $2)
 		RETURNING id, project_id, content, created_at, updated_at, deleted_at
@@ -33,9 +36,9 @@ func (r *NodeRepository) Create(ctx context.Context, projectID uuid.UUID, conten
 	return &node, nil
 }
 
-func (r *NodeRepository) GetByID(ctx context.Context, nodeID uuid.UUID) (*model.Node, error) {
+func (r *nodeRepository) GetByID(ctx context.Context, nodeID uuid.UUID) (*model.Node, error) {
 	var node model.Node
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT id, project_id, content, created_at, updated_at, deleted_at
 		FROM nodes
 		WHERE id = $1 AND deleted_at IS NULL
@@ -52,8 +55,8 @@ func (r *NodeRepository) GetByID(ctx context.Context, nodeID uuid.UUID) (*model.
 	return &node, nil
 }
 
-func (r *NodeRepository) Update(ctx context.Context, nodeID uuid.UUID, content string) error {
-	_, err := r.db.pool.Exec(ctx, `
+func (r *nodeRepository) Update(ctx context.Context, nodeID uuid.UUID, content string) error {
+	_, err := r.db.Exec(ctx, `
 		UPDATE nodes SET content = $1, updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
 	`, content, nodeID)
@@ -63,8 +66,8 @@ func (r *NodeRepository) Update(ctx context.Context, nodeID uuid.UUID, content s
 	return nil
 }
 
-func (r *NodeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Node, error) {
-	rows, err := r.db.pool.Query(ctx, `
+func (r *nodeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Node, error) {
+	rows, err := r.db.Query(ctx, `
 		SELECT id, project_id, content, created_at, updated_at, deleted_at
 		FROM nodes
 		WHERE project_id = $1 AND deleted_at IS NULL
@@ -86,8 +89,8 @@ func (r *NodeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUI
 	return nodes, nil
 }
 
-func (r *NodeRepository) SoftDeleteWithDescendants(ctx context.Context, projectID, nodeID uuid.UUID) error {
-	_, err := r.db.pool.Exec(ctx, `
+func (r *nodeRepository) SoftDeleteWithDescendants(ctx context.Context, projectID, nodeID uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
 		WITH RECURSIVE subtree AS (
 			SELECT e.child_node_id AS id
 			FROM edges e
@@ -109,7 +112,7 @@ func (r *NodeRepository) SoftDeleteWithDescendants(ctx context.Context, projectI
 	return nil
 }
 
-func (r *NodeRepository) GetMaxOrderIndex(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID) (int, error) {
+func (r *nodeRepository) GetMaxOrderIndex(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID) (int, error) {
 	var maxOrder int
 	query := `
 		SELECT COALESCE(MAX(order_index), -1) + 1
@@ -125,7 +128,7 @@ func (r *NodeRepository) GetMaxOrderIndex(ctx context.Context, projectID uuid.UU
 		args = append(args, *parentNodeID)
 	}
 
-	err := r.db.pool.QueryRow(ctx, query, args...).Scan(&maxOrder)
+	err := r.db.QueryRow(ctx, query, args...).Scan(&maxOrder)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get max order index: %w", err)
 	}

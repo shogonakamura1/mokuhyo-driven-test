@@ -1,4 +1,4 @@
-package repository
+package supabase
 
 import (
 	"context"
@@ -7,19 +7,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/mokuhyo-driven-test/api/internal/model"
+	"github.com/mokuhyo-driven-test/api/internal/repository"
 )
 
-type EdgeRepository struct {
-	db *DB
+// edgeRepository はエッジリポジトリのSupabase実装です
+type edgeRepository struct {
+	db repository.DBInterface
 }
 
-func NewEdgeRepository(db *DB) *EdgeRepository {
-	return &EdgeRepository{db: db}
+// NewEdgeRepository は新しいエッジリポジトリを作成します
+func NewEdgeRepository(db repository.DBInterface) repository.EdgeRepository {
+	return &edgeRepository{db: db}
 }
 
-func (r *EdgeRepository) Create(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID, childNodeID uuid.UUID, relation model.RelationType, relationLabel *string, orderIndex int) (*model.Edge, error) {
+func (r *edgeRepository) Create(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID, childNodeID uuid.UUID, relation model.RelationType, relationLabel *string, orderIndex int) (*model.Edge, error) {
 	var edge model.Edge
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO edges (project_id, parent_node_id, child_node_id, relation, relation_label, order_index)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, project_id, parent_node_id, child_node_id, relation, relation_label, order_index, created_at, updated_at
@@ -34,8 +37,8 @@ func (r *EdgeRepository) Create(ctx context.Context, projectID uuid.UUID, parent
 	return &edge, nil
 }
 
-func (r *EdgeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Edge, error) {
-	rows, err := r.db.pool.Query(ctx, `
+func (r *edgeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Edge, error) {
+	rows, err := r.db.Query(ctx, `
 		SELECT e.id, e.project_id, e.parent_node_id, e.child_node_id, e.relation, e.relation_label, e.order_index, e.created_at, e.updated_at
 		FROM edges e
 		INNER JOIN nodes n ON e.child_node_id = n.id
@@ -60,9 +63,9 @@ func (r *EdgeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUI
 	return edges, nil
 }
 
-func (r *EdgeRepository) GetByID(ctx context.Context, edgeID uuid.UUID) (*model.Edge, error) {
+func (r *edgeRepository) GetByID(ctx context.Context, edgeID uuid.UUID) (*model.Edge, error) {
 	var edge model.Edge
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT id, project_id, parent_node_id, child_node_id, relation, relation_label, order_index, created_at, updated_at
 		FROM edges
 		WHERE id = $1
@@ -80,7 +83,7 @@ func (r *EdgeRepository) GetByID(ctx context.Context, edgeID uuid.UUID) (*model.
 	return &edge, nil
 }
 
-func (r *EdgeRepository) Update(ctx context.Context, edgeID uuid.UUID, relation *string, relationLabel *string) error {
+func (r *edgeRepository) Update(ctx context.Context, edgeID uuid.UUID, relation *string, relationLabel *string) error {
 	query := "UPDATE edges SET updated_at = NOW()"
 	args := []interface{}{}
 	argIndex := 1
@@ -99,15 +102,15 @@ func (r *EdgeRepository) Update(ctx context.Context, edgeID uuid.UUID, relation 
 	query += fmt.Sprintf(" WHERE id = $%d", argIndex)
 	args = append(args, edgeID)
 
-	_, err := r.db.pool.Exec(ctx, query, args...)
+	_, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update edge: %w", err)
 	}
 	return nil
 }
 
-func (r *EdgeRepository) Reorder(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID, orderedChildNodeIDs []uuid.UUID) error {
-	tx, err := r.db.pool.Begin(ctx)
+func (r *edgeRepository) Reorder(ctx context.Context, projectID uuid.UUID, parentNodeID *uuid.UUID, orderedChildNodeIDs []uuid.UUID) error {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}

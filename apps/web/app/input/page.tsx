@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
@@ -12,12 +13,36 @@ export default function InputPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loadingProjects, setLoadingProjects] = useState(true)
 
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login')
     }
   }, [user, loading, router])
+
+  useEffect(() => {
+    if (loading || !user) return
+
+    const loadProjects = async () => {
+      try {
+        setLoadingProjects(true)
+        const response = await api.get<{ projects: Project[] }>('/v1/projects')
+        const sorted = [...response.projects].sort(
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        )
+        setProjects(sorted)
+      } catch (error) {
+        console.error('Failed to load projects:', error)
+        setProjects([])
+      } finally {
+        setLoadingProjects(false)
+      }
+    }
+
+    loadProjects()
+  }, [user, loading])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -55,7 +80,30 @@ export default function InputPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
+      <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8 space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold mb-3">過去のツリー</h2>
+          {loadingProjects ? (
+            <div className="text-sm text-gray-500">読み込み中...</div>
+          ) : projects.length === 0 ? (
+            <div className="text-sm text-gray-500">まだ作成したツリーがありません</div>
+          ) : (
+            <div className="space-y-2">
+              {projects.map(project => (
+                <Link
+                  key={project.id}
+                  href={`/p/${project.id}`}
+                  className="block rounded-lg border border-gray-200 px-3 py-2 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                >
+                  <div className="text-sm font-medium text-gray-900">{project.title}</div>
+                  <div className="text-xs text-gray-500">
+                    最終更新: {new Date(project.updated_at).toLocaleString('ja-JP')}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
         <h1 className="text-2xl font-bold text-center mb-6">目標を入力</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

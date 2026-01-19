@@ -10,11 +10,11 @@ import (
 )
 
 type NodeService struct {
-	nodeRepo *repository.NodeRepository
-	edgeRepo *repository.EdgeRepository
+	nodeRepo repository.NodeRepository
+	edgeRepo repository.EdgeRepository
 }
 
-func NewNodeService(nodeRepo *repository.NodeRepository, edgeRepo *repository.EdgeRepository) *NodeService {
+func NewNodeService(nodeRepo repository.NodeRepository, edgeRepo repository.EdgeRepository) *NodeService {
 	return &NodeService{
 		nodeRepo: nodeRepo,
 		edgeRepo: edgeRepo,

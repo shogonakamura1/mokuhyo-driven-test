@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/mokuhyo-driven-test/api/internal/handler"
 	"github.com/mokuhyo-driven-test/api/internal/repository"
+	postgresRepo "github.com/mokuhyo-driven-test/api/internal/repository/postgres"
+	supabaseRepo "github.com/mokuhyo-driven-test/api/internal/repository/supabase"
 	"github.com/mokuhyo-driven-test/api/internal/service"
 	"github.com/mokuhyo-driven-test/api/pkg/auth"
 )
@@ -25,32 +29,82 @@ func main() {
 		log.Fatal("DATABASE_URL is required")
 	}
 
-	db, err := repository.NewDB(dbURL)
+	// DB_TYPEフラグに基づいて実装を選択
+	dbType := strings.ToLower(os.Getenv("DB_TYPE"))
+	if dbType == "" {
+		dbType = "local" // デフォルトはローカルPostgreSQL
+	}
+
+	var db repository.DBInterface
+	var err error
+
+	switch dbType {
+	case "supabase":
+		log.Println("Using Supabase database implementation")
+		db, err = supabaseRepo.NewSupabaseDB(dbURL)
+	case "local", "postgres":
+		log.Println("Using local PostgreSQL database implementation")
+		db, err = postgresRepo.NewPostgresDB(dbURL)
+	default:
+		log.Fatalf("Invalid DB_TYPE: %s. Valid values are 'local', 'postgres', or 'supabase'", dbType)
+	}
+
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
-	// JWKS client for JWT verification
-	jwksURL := os.Getenv("SUPABASE_JWKS_URL")
-	if jwksURL == "" {
-		log.Fatal("SUPABASE_JWKS_URL is required")
+	// Google OAuth設定
+	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
+	googleClientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	googleRedirectURL := os.Getenv("GOOGLE_REDIRECT_URL")
+	if googleRedirectURL == "" {
+		// フロントエンドのポートを環境変数から取得（デフォルトは3000）
+		frontendPort := os.Getenv("FRONTEND_PORT")
+		if frontendPort == "" {
+			frontendPort = "3000"
+		}
+		googleRedirectURL = fmt.Sprintf("http://localhost:%s", frontendPort)
 	}
-	jwksClient := auth.NewJWKSClient(jwksURL)
 
-	// Repositories
-	projectRepo := repository.NewProjectRepository(db)
-	nodeRepo := repository.NewNodeRepository(db)
-	edgeRepo := repository.NewEdgeRepository(db)
-	settingsRepo := repository.NewSettingsRepository(db)
+	if googleClientID == "" || googleClientSecret == "" {
+		log.Fatal("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required")
+	}
+
+	googleOAuthConfig := auth.NewGoogleOAuthConfig(googleClientID, googleClientSecret, googleRedirectURL)
+	googleJWKSClient := auth.NewGoogleJWKSClient()
+
+	// Repositories - DB_TYPEに応じて適切な実装を使用
+	var projectRepo repository.ProjectRepository
+	var nodeRepo repository.NodeRepository
+	var edgeRepo repository.EdgeRepository
+	var settingsRepo repository.SettingsRepository
+	var userRepo repository.UserRepository
+
+	switch dbType {
+	case "supabase":
+		projectRepo = supabaseRepo.NewProjectRepository(db)
+		nodeRepo = supabaseRepo.NewNodeRepository(db)
+		edgeRepo = supabaseRepo.NewEdgeRepository(db)
+		settingsRepo = supabaseRepo.NewSettingsRepository(db)
+		userRepo = supabaseRepo.NewUserRepository(db)
+	case "local", "postgres":
+		projectRepo = postgresRepo.NewProjectRepository(db)
+		nodeRepo = postgresRepo.NewNodeRepository(db)
+		edgeRepo = postgresRepo.NewEdgeRepository(db)
+		settingsRepo = postgresRepo.NewSettingsRepository(db)
+		userRepo = postgresRepo.NewUserRepository(db)
+	}
 
 	// Services
+	authService := service.NewAuthService(userRepo)
 	projectService := service.NewProjectService(projectRepo, nodeRepo, edgeRepo)
 	nodeService := service.NewNodeService(nodeRepo, edgeRepo)
 	edgeService := service.NewEdgeService(edgeRepo)
 	settingsService := service.NewSettingsService(settingsRepo)
 
 	// Handlers
+	authHandler := handler.NewAuthHandler(authService, googleOAuthConfig)
 	meHandler := handler.NewMeHandler(settingsService)
 	projectHandler := handler.NewProjectHandler(projectService)
 	nodeHandler := handler.NewNodeHandler(nodeService, projectService)
@@ -83,9 +137,25 @@ func main() {
 	// API routes
 	v1 := r.Group("/v1")
 	{
+		// Public auth routes
+		v1.POST("/auth/google", authHandler.HandleGoogleAuth)
+
 		// Auth required routes
 		authRequired := v1.Group("")
-		authRequired.Use(auth.AuthMiddleware(jwksClient))
+		// Google認証ミドルウェアを使用
+		authRequired.Use(func(c *gin.Context) {
+			// ミドルウェア内でユーザーIDを取得する関数
+			getUserIDByGoogleID := func(googleID string) (uuid.UUID, error) {
+				user, err := authService.GetUserByGoogleID(c.Request.Context(), googleID)
+				if err != nil || user == nil {
+					return uuid.Nil, fmt.Errorf("user not found")
+				}
+				return user.ID, nil
+			}
+			// Google認証ミドルウェアを実行
+			middleware := auth.GoogleAuthMiddleware(googleJWKSClient, getUserIDByGoogleID)
+			middleware(c)
+		})
 		{
 			// Me
 			authRequired.GET("/me", meHandler.GetMe)

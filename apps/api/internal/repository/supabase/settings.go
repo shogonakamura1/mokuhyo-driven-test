@@ -1,4 +1,4 @@
-package repository
+package supabase
 
 import (
 	"context"
@@ -7,19 +7,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/mokuhyo-driven-test/api/internal/model"
+	"github.com/mokuhyo-driven-test/api/internal/repository"
 )
 
-type SettingsRepository struct {
-	db *DB
+// settingsRepository は設定リポジトリのSupabase実装です
+type settingsRepository struct {
+	db repository.DBInterface
 }
 
-func NewSettingsRepository(db *DB) *SettingsRepository {
-	return &SettingsRepository{db: db}
+// NewSettingsRepository は新しい設定リポジトリを作成します
+func NewSettingsRepository(db repository.DBInterface) repository.SettingsRepository {
+	return &settingsRepository{db: db}
 }
 
-func (r *SettingsRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*model.UserSettings, error) {
+func (r *settingsRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*model.UserSettings, error) {
 	var settings model.UserSettings
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT user_id, theme, accent_color, updated_at
 		FROM user_settings
 		WHERE user_id = $1
@@ -40,7 +43,7 @@ func (r *SettingsRepository) GetByUserID(ctx context.Context, userID uuid.UUID) 
 	return &settings, nil
 }
 
-func (r *SettingsRepository) Upsert(ctx context.Context, userID uuid.UUID, req model.UpdateSettingsRequest) (*model.UserSettings, error) {
+func (r *settingsRepository) Upsert(ctx context.Context, userID uuid.UUID, req model.UpdateSettingsRequest) (*model.UserSettings, error) {
 	// Get current settings or create default
 	current, _ := r.GetByUserID(ctx, userID)
 
@@ -54,7 +57,7 @@ func (r *SettingsRepository) Upsert(ctx context.Context, userID uuid.UUID, req m
 		accentColor = *req.AccentColor
 	}
 
-	_, err := r.db.pool.Exec(ctx, `
+	_, err := r.db.Exec(ctx, `
 		INSERT INTO user_settings (user_id, theme, accent_color, updated_at)
 		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT (user_id) DO UPDATE

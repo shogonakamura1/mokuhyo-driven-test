@@ -1,25 +1,30 @@
-package repository
+package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/mokuhyo-driven-test/api/internal/model"
+	"github.com/mokuhyo-driven-test/api/internal/repository"
 )
 
-type ProjectRepository struct {
-	db *DB
+// projectRepository はプロジェクトリポジトリのPostgreSQL実装です
+type projectRepository struct {
+	db repository.DBInterface
 }
 
-func NewProjectRepository(db *DB) *ProjectRepository {
-	return &ProjectRepository{db: db}
+// NewProjectRepository は新しいプロジェクトリポジトリを作成します
+func NewProjectRepository(db repository.DBInterface) repository.ProjectRepository {
+	return &projectRepository{db: db}
 }
 
-func (r *ProjectRepository) Create(ctx context.Context, userID uuid.UUID, req model.CreateProjectRequest) (*model.Project, error) {
+func (r *projectRepository) Create(ctx context.Context, userID uuid.UUID, req model.CreateProjectRequest) (*model.Project, error) {
 	var project model.Project
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO projects (user_id, title, description)
 		VALUES ($1, $2, $3)
 		RETURNING id, user_id, title, description, created_at, updated_at, archived_at
@@ -33,8 +38,8 @@ func (r *ProjectRepository) Create(ctx context.Context, userID uuid.UUID, req mo
 	return &project, nil
 }
 
-func (r *ProjectRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]model.Project, error) {
-	rows, err := r.db.pool.Query(ctx, `
+func (r *projectRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]model.Project, error) {
+	rows, err := r.db.Query(ctx, `
 		SELECT id, user_id, title, description, created_at, updated_at, archived_at
 		FROM projects
 		WHERE user_id = $1 AND archived_at IS NULL
@@ -57,9 +62,9 @@ func (r *ProjectRepository) ListByUserID(ctx context.Context, userID uuid.UUID) 
 	return projects, nil
 }
 
-func (r *ProjectRepository) GetByID(ctx context.Context, projectID uuid.UUID) (*model.Project, error) {
+func (r *projectRepository) GetByID(ctx context.Context, projectID uuid.UUID) (*model.Project, error) {
 	var project model.Project
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT id, user_id, title, description, created_at, updated_at, archived_at
 		FROM projects
 		WHERE id = $1
@@ -76,7 +81,7 @@ func (r *ProjectRepository) GetByID(ctx context.Context, projectID uuid.UUID) (*
 	return &project, nil
 }
 
-func (r *ProjectRepository) Update(ctx context.Context, projectID uuid.UUID, req model.UpdateProjectRequest) error {
+func (r *projectRepository) Update(ctx context.Context, projectID uuid.UUID, req model.UpdateProjectRequest) error {
 	query := "UPDATE projects SET updated_at = NOW()"
 	args := []interface{}{}
 	argIndex := 1
@@ -102,16 +107,16 @@ func (r *ProjectRepository) Update(ctx context.Context, projectID uuid.UUID, req
 	query += fmt.Sprintf(" WHERE id = $%d", argIndex)
 	args = append(args, projectID)
 
-	_, err := r.db.pool.Exec(ctx, query, args...)
+	_, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
 	}
 	return nil
 }
 
-func (r *ProjectRepository) CheckOwnership(ctx context.Context, projectID, userID uuid.UUID) (bool, error) {
+func (r *projectRepository) CheckOwnership(ctx context.Context, projectID, userID uuid.UUID) (bool, error) {
 	var count int
-	err := r.db.pool.QueryRow(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM projects WHERE id = $1 AND user_id = $2
 	`, projectID, userID).Scan(&count)
 	if err != nil {
@@ -120,12 +125,44 @@ func (r *ProjectRepository) CheckOwnership(ctx context.Context, projectID, userI
 	return count > 0, nil
 }
 
-func (r *ProjectRepository) UpdateUpdatedAt(ctx context.Context, projectID uuid.UUID) error {
-	_, err := r.db.pool.Exec(ctx, `
+func (r *projectRepository) UpdateUpdatedAt(ctx context.Context, projectID uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
 		UPDATE projects SET updated_at = NOW() WHERE id = $1
 	`, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to update updated_at: %w", err)
 	}
 	return nil
+}
+
+// nullString は *string を sql.NullString に変換します
+func nullString(s *string) sql.NullString {
+	if s == nil {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: *s, Valid: true}
+}
+
+// nullTime は *time.Time を sql.NullTime に変換します
+func nullTime(t *time.Time) sql.NullTime {
+	if t == nil {
+		return sql.NullTime{Valid: false}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
+}
+
+// stringPtr は sql.NullString を *string に変換します
+func stringPtr(s sql.NullString) *string {
+	if !s.Valid {
+		return nil
+	}
+	return &s.String
+}
+
+// timePtr は sql.NullTime を *time.Time に変換します
+func timePtr(t sql.NullTime) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
 }

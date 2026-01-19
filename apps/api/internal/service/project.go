@@ -10,12 +10,12 @@ import (
 )
 
 type ProjectService struct {
-	projectRepo *repository.ProjectRepository
-	nodeRepo    *repository.NodeRepository
-	edgeRepo    *repository.EdgeRepository
+	projectRepo repository.ProjectRepository
+	nodeRepo    repository.NodeRepository
+	edgeRepo    repository.EdgeRepository
 }
 
-func NewProjectService(projectRepo *repository.ProjectRepository, nodeRepo *repository.NodeRepository, edgeRepo *repository.EdgeRepository) *ProjectService {
+func NewProjectService(projectRepo repository.ProjectRepository, nodeRepo repository.NodeRepository, edgeRepo repository.EdgeRepository) *ProjectService {
 	return &ProjectService{
 		projectRepo: projectRepo,
 		nodeRepo:    nodeRepo,

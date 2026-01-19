@@ -9,10 +9,10 @@ import (
 )
 
 type SettingsService struct {
-	settingsRepo *repository.SettingsRepository
+	settingsRepo repository.SettingsRepository
 }
 
-func NewSettingsService(settingsRepo *repository.SettingsRepository) *SettingsService {
+func NewSettingsService(settingsRepo repository.SettingsRepository) *SettingsService {
 	return &SettingsService{settingsRepo: settingsRepo}
 }
 

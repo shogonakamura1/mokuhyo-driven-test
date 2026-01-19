@@ -1,6 +1,6 @@
 module github.com/mokuhyo-driven-test/api
 
-go 1.23
+go 1.24.0
 
 require (
 	github.com/gin-gonic/gin v1.9.1
@@ -36,6 +36,7 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/net v0.10.0 // indirect
+	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.14.0 // indirect

@@ -9,9 +9,9 @@ interface NodeCardProps {
   isEditing: boolean
   onClick: () => void
   onDoubleClick: () => void
-  onEditComplete: (content: string) => void
+  onEditComplete: (content: string) => Promise<void>
   onEditCancel: () => void
-  onKeyDown: (e: React.KeyboardEvent) => void
+  onKeyDown: (e: React.KeyboardEvent, content: string) => void
   onDelete: () => void
 }
 
@@ -40,22 +40,30 @@ export default function NodeCard({
     }
   }, [isEditing])
 
-  const handleBlur = () => {
-    if (content.trim() && content !== node.content) {
-      onEditComplete(content)
+  const handleBlur = async () => {
+    // 空文字列でも更新できるようにする（空のノードを許可）
+    if (content !== node.content) {
+      await onEditComplete(content)
     } else {
       setContent(node.content)
       onEditCancel()
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && e.shiftKey) {
+  const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
       e.preventDefault()
-      handleBlur()
+      // Shift+Enterは保存して編集終了、EnterはTreeCanvas側で保存とノード作成を行う
+      if (e.shiftKey) {
+        if (content !== node.content) {
+          await onEditComplete(content)
+        }
+        return
+      }
+      onKeyDown(e, content)
       return
     }
-    onKeyDown(e)
+    onKeyDown(e, content)
   }
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -86,7 +94,9 @@ export default function NodeCard({
           maxLength={200}
         />
       ) : (
-        <div className="text-gray-900">{node.content}</div>
+        <div className={`text-gray-900 ${node.content === '' ? 'text-gray-400' : ''}`}>
+          {node.content || '\u00A0'}
+        </div>
       )}
     </div>
   )

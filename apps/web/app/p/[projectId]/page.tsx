@@ -17,6 +17,7 @@ export default function ProjectPage() {
   const [tree, setTree] = useState<TreeResponse | null>(null)
   const [loadingTree, setLoadingTree] = useState(true)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -42,16 +43,6 @@ export default function ProjectPage() {
     }
   }
 
-  const handleSave = async () => {
-    try {
-      await api.post(`/v1/projects/${projectId}/save`)
-      alert('保存しました')
-    } catch (error) {
-      console.error('Failed to save:', error)
-      alert('保存に失敗しました')
-    }
-  }
-
   const handleNodeCreate = async (
     content: string,
     parentNodeId: string | null,
@@ -69,6 +60,9 @@ export default function ProjectPage() {
         }
       )
       await loadTree()
+      // ツリーが再読み込みされた後、新しいノードを選択して編集モードにする
+      setSelectedNodeId(response.node.id)
+      setEditingNodeId(response.node.id)
       return response.node
     } catch (error) {
       console.error('Failed to create node:', error)
@@ -80,6 +74,10 @@ export default function ProjectPage() {
     try {
       await api.patch(`/v1/projects/${projectId}/nodes/${nodeId}`, { content })
       await loadTree()
+      // 更新後、編集モードを解除
+      if (editingNodeId === nodeId) {
+        setEditingNodeId(null)
+      }
     } catch (error) {
       console.error('Failed to update node:', error)
       throw error
@@ -95,6 +93,9 @@ export default function ProjectPage() {
       await loadTree()
       if (selectedNodeId === nodeId) {
         setSelectedNodeId(null)
+      }
+      if (editingNodeId === nodeId) {
+        setEditingNodeId(null)
       }
     } catch (error) {
       console.error('Failed to delete node:', error)
@@ -135,14 +136,15 @@ export default function ProjectPage() {
     <div className="flex h-screen bg-gray-50">
       <Sidebar
         project={tree.project}
-        onSave={handleSave}
       />
       <div className="flex-1 overflow-auto">
         <TreeCanvas
           nodes={tree.nodes}
           edges={tree.edges}
           selectedNodeId={selectedNodeId}
+          editingNodeId={editingNodeId}
           onSelectNode={setSelectedNodeId}
+          onSetEditingNodeId={setEditingNodeId}
           onNodeCreate={handleNodeCreate}
           onNodeUpdate={handleNodeUpdate}
           onNodeDelete={handleNodeDelete}

@@ -16,7 +16,7 @@ type Node struct {
 }
 
 type CreateNodeRequest struct {
-	Content       string     `json:"content" binding:"required,min=1,max=200"`
+	Content       string     `json:"content" binding:"max=200"`
 	ParentNodeID  *uuid.UUID `json:"parent_node_id"`
 	Relation      string     `json:"relation,omitempty"`
 	RelationLabel *string    `json:"relation_label,omitempty"`
@@ -24,5 +24,5 @@ type CreateNodeRequest struct {
 }
 
 type UpdateNodeRequest struct {
-	Content string `json:"content" binding:"required,min=1,max=200"`
+	Content string `json:"content" binding:"max=200"`
 }
