@@ -22,6 +22,7 @@ type CreateNodeRequest struct {
 	Relation      string     `json:"relation,omitempty"`
 	RelationLabel *string    `json:"relation_label,omitempty"`
 	OrderIndex    *int       `json:"order_index,omitempty"`
+	Question      *string    `json:"question,omitempty" binding:"omitempty,max=30"`
 }
 
 type UpdateNodeRequest struct {

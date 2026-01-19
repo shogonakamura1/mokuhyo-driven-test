@@ -51,6 +51,9 @@ export default function NodeCard({
   }
 
   const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) {
+      return
+    }
     if (e.key === 'Enter') {
       e.preventDefault()
       // Shift+Enterは保存して編集終了、EnterはTreeCanvas側で保存とノード作成を行う

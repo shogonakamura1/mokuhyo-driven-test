@@ -102,22 +102,22 @@ func main() {
 	authService := service.NewAuthService(userRepo)
 	projectService := service.NewProjectService(projectRepo, nodeRepo, edgeRepo)
 
-	var questionSelector ai.QuestionSelector
+	var questionGenerator ai.QuestionGenerator
 	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 	geminiModel := os.Getenv("GEMINI_MODEL")
 	if geminiAPIKey != "" {
-		selector, err := ai.NewGeminiQuestionSelector(context.Background(), geminiAPIKey, geminiModel)
+		generator, err := ai.NewGeminiQuestionGenerator(context.Background(), geminiAPIKey, geminiModel)
 		if err != nil {
 			log.Printf("Gemini client init failed: %v", err)
 		} else {
-			questionSelector = selector
-			defer selector.Close()
+			questionGenerator = generator
+			defer generator.Close()
 		}
 	} else {
-		log.Println("GEMINI_API_KEY is not set, using fallback question selection")
+		log.Println("GEMINI_API_KEY is not set, using fallback question generation")
 	}
 
-	nodeService := service.NewNodeService(nodeRepo, edgeRepo, questionSelector)
+	nodeService := service.NewNodeService(nodeRepo, edgeRepo, questionGenerator)
 	edgeService := service.NewEdgeService(edgeRepo)
 	settingsService := service.NewSettingsService(settingsRepo)
 

@@ -11,7 +11,13 @@ interface TreeCanvasProps { // TreeCanvasコンポーネントのプロップス
   editingNodeId: string | null // 編集中のノードのID
   onSelectNode: (nodeId: string | null) => void // ノード選択時のコールバック
   onSetEditingNodeId: (nodeId: string | null) => void // 編集ノードID設定時のコールバック
-  onNodeCreate: (content: string, parentNodeId: string | null, relation?: string, orderIndex?: number) => Promise<Node> // ノード作成時のコールバック
+  onNodeCreate: (
+    content: string,
+    parentNodeId: string | null,
+    relation?: string,
+    orderIndex?: number,
+    question?: string
+  ) => Promise<Node> // ノード作成時のコールバック
   onNodeUpdate: (nodeId: string, content: string) => Promise<void> // ノード更新時のコールバック
   onNodeDelete: (nodeId: string) => Promise<void> // ノード削除時のコールバック
   onEdgeUpdate: (edgeId: string, relation: string, relationLabel?: string) => Promise<void> // エッジ更新時のコールバック
@@ -55,8 +61,8 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
   }, [nodes, edges]) // nodesとedgesが変わった時のみ再計算
 
   const handleNodeClick = (nodeId: string) => { // ノードクリック時のハンドラ
-    if (editingNodeId === nodeId) return // 編集中のノードの場合は何もしない
     onSelectNode(nodeId) // ノード選択コールバックを呼ぶ
+    onSetEditingNodeId(nodeId) // クリックで編集モードにする
   }
 
   const handleNodeDoubleClick = (nodeId: string) => { // ノードダブルクリック時のハンドラ
@@ -97,11 +103,17 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
     parentNodeId: string | null, // 親ノードID
     currentContent: string // 現在の入力内容
   ) => {
+    if (e.nativeEvent.isComposing) {
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) { // Enterキー（Shiftなし）が押された場合
       e.preventDefault() // デフォルト動作をキャンセル
       if (!treeStructure.nodeMap.has(nodeId)) return // ノードが存在しない場合は終了
 
       await handleNodeEditComplete(nodeId, currentContent) // 編集内容を保存
+
+      const currentNode = treeStructure.nodeMap.get(nodeId)
+      const inheritedQuestion = currentNode?.question?.trim()
 
       // Get siblings to determine order_index
       const siblings = treeStructure.childrenMap.get(parentNodeId || 'root') || [] // 兄弟ノードを取得
@@ -109,7 +121,13 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
       const orderIndex = currentIndex >= 0 ? currentIndex + 1 : siblings.length // 新しいノードのorder_indexを計算
 
       try {
-        const newNode = await onNodeCreate('', parentNodeId, 'neutral', orderIndex) // 並列ノード（兄弟）を作成
+        const newNode = await onNodeCreate(
+          '',
+          parentNodeId,
+          'neutral',
+          orderIndex,
+          inheritedQuestion || undefined
+        ) // 並列ノード（兄弟）を作成
         // 新しく作成したノードを選択して編集モードにする
         // 編集モードはpage.tsxのhandleNodeCreateで設定される
         onSelectNode(newNode.id) // 新しいノードを選択
@@ -153,15 +171,16 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
       : edge?.relation // AI質問がない場合は既存の関係ラベルを使う
     const isSelected = selectedNodeId === node.id // 選択されているかどうか
     const isEditing = editingNodeId === node.id // 編集中かどうか
+    const shouldReserveLabel = parentNodeId !== null && !!edge // 兄弟間でラベル位置を揃える
 
     return (
       <div key={node.id} className="flex items-start gap-6 mb-2"> {/* 横並びレイアウト、上揃え、間隔6、下マージン2 */}
         <div className="flex items-center gap-2"> {/* ノードとラベルを横並び、中央揃え、間隔2 */}
           {/* エッジが存在する場合、関係ラベルを表示 */}
-          {edge && edgeLabel && (
-            <span className="text-xs text-gray-500 mt-2"> {/* 関係ラベルを表示 */}
+          {shouldReserveLabel && (
+            <span className="text-xs text-gray-500 mt-2 min-w-[7rem] max-w-[10rem] text-right"> {/* 関係ラベルを表示 */}
               {/* カスタム関係でラベルがある場合はカスタムラベル、neutral関係の場合は何も表示せず、それ以外は関係タイプを表示 */}
-              {edgeLabel}
+              {edgeLabel || ''}
             </span>
           )}
           <NodeCard // ノードカードコンポーネント

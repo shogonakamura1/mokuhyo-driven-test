@@ -47,7 +47,8 @@ export default function ProjectPage() {
     content: string,
     parentNodeId: string | null,
     relation: string = 'neutral',
-    orderIndex?: number
+    orderIndex?: number,
+    question?: string
   ) => {
     try {
       const response = await api.post<{ node: Node; edge: Edge }>(
@@ -57,6 +58,7 @@ export default function ProjectPage() {
           parent_node_id: parentNodeId || null,
           relation,
           order_index: orderIndex,
+          question,
         }
       )
       await loadTree()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,26 +15,31 @@ import (
 type NodeService struct {
 	nodeRepo         repository.NodeRepository
 	edgeRepo         repository.EdgeRepository
-	questionSelector ai.QuestionSelector
+	questionGenerator ai.QuestionGenerator
 }
 
-func NewNodeService(nodeRepo repository.NodeRepository, edgeRepo repository.EdgeRepository, questionSelector ai.QuestionSelector) *NodeService {
+func NewNodeService(nodeRepo repository.NodeRepository, edgeRepo repository.EdgeRepository, questionGenerator ai.QuestionGenerator) *NodeService {
 	return &NodeService{
-		nodeRepo:         nodeRepo,
-		edgeRepo:         edgeRepo,
-		questionSelector: questionSelector,
+		nodeRepo:          nodeRepo,
+		edgeRepo:          edgeRepo,
+		questionGenerator: questionGenerator,
 	}
 }
 
 func (s *NodeService) CreateNode(ctx context.Context, projectID uuid.UUID, req model.CreateNodeRequest) (*model.Node, *model.Edge, error) {
 	var question *string
 	if req.ParentNodeID != nil {
-		selected, err := s.selectQuestion(ctx, projectID, *req.ParentNodeID)
-		if err != nil {
-			fallback := fallbackQuestionSelection(defaultQuestionCandidates(), nil, nil)
-			selected = fallback
+		if req.Question != nil && strings.TrimSpace(*req.Question) != "" {
+			selected := strings.TrimSpace(*req.Question)
+			question = &selected
+		} else {
+			selected, err := s.generateQuestion(ctx, projectID, *req.ParentNodeID)
+			if err != nil {
+				fallback := fallbackQuestionText(nil, nil, nil)
+				selected = fallback
+			}
+			question = &selected
 		}
-		question = &selected
 	}
 
 	// Create node
@@ -77,7 +83,7 @@ func (s *NodeService) DeleteNode(ctx context.Context, projectID, nodeID uuid.UUI
 	return s.nodeRepo.SoftDeleteWithDescendants(ctx, projectID, nodeID)
 }
 
-func (s *NodeService) selectQuestion(ctx context.Context, projectID uuid.UUID, parentNodeID uuid.UUID) (string, error) {
+func (s *NodeService) generateQuestion(ctx context.Context, projectID uuid.UUID, parentNodeID uuid.UUID) (string, error) {
 	nodes, err := s.nodeRepo.ListByProjectID(ctx, projectID)
 	if err != nil {
 		return "", fmt.Errorf("failed to list nodes: %w", err)
@@ -104,29 +110,33 @@ func (s *NodeService) selectQuestion(ctx context.Context, projectID uuid.UUID, p
 	ancestors := collectAncestors(parentNodeID, parentByChild, nodeByID)
 	siblings := collectSiblings(parentNodeID, edges, nodeByID)
 
-	candidates := questionCandidates()
 	edgeByChild := make(map[uuid.UUID]model.Edge, len(edges))
 	for _, edge := range edges {
 		edgeByChild[edge.ChildNodeID] = edge
 	}
-	prompt := buildQuestionPrompt(parentNode, ancestors, siblings, candidates, edgeByChild)
-	if s.questionSelector == nil {
-		return fallbackQuestionSelection(candidates, &parentNode, siblings), nil
+	prompt := buildQuestionPrompt(parentNode, ancestors, siblings, edgeByChild)
+	if s.questionGenerator == nil {
+		return fallbackQuestionText(&parentNode, ancestors, siblings), nil
 	}
 
-	selected, err := s.questionSelector.Select(ctx, prompt, candidates)
+	rawQuestion, err := s.questionGenerator.GenerateQuestion(ctx, prompt)
 	if err != nil {
-		return fallbackQuestionSelection(candidates, &parentNode, siblings), nil
+		return fallbackQuestionText(&parentNode, ancestors, siblings), nil
 	}
-	return enforceQuestionDiversity(selected, candidates, siblings), nil
-}
 
-func questionCandidates() []string {
-	return []string{"なんのために？", "どうやって？", "具体的には？"}
-}
-
-func defaultQuestionCandidates() []string {
-	return questionCandidates()
+	question := normalizeQuestion(rawQuestion)
+	if !isQuestionUsable(question, parentNode, ancestors, siblings) {
+		repairPrompt := buildQuestionRepairPrompt(rawQuestion, parentNode, ancestors, siblings, edgeByChild)
+		repaired, err := s.questionGenerator.GenerateQuestion(ctx, repairPrompt)
+		if err == nil {
+			repairedQuestion := normalizeQuestion(repaired)
+			if isQuestionUsable(repairedQuestion, parentNode, ancestors, siblings) {
+				return repairedQuestion, nil
+			}
+		}
+		return fallbackQuestionText(&parentNode, ancestors, siblings), nil
+	}
+	return question, nil
 }
 
 func collectAncestors(
@@ -174,19 +184,18 @@ func buildQuestionPrompt(
 	parent model.Node,
 	ancestors []model.Node,
 	siblings []model.Node,
-	candidates []string,
 	edgeByChild map[uuid.UUID]model.Edge,
 ) string {
 	var builder strings.Builder
-	builder.WriteString("あなたは目標達成のための思考を促す質問を選ぶアシスタントです。\n")
-	builder.WriteString("以下の候補から1つだけ選び、候補の文字列のみを出力してください。\n")
-	builder.WriteString("候補が偏らないように、兄弟ノードで同じ質問が続いている場合は別の候補を優先してください。\n")
-	builder.WriteString("内容が方法・手段寄りなら『具体的には？』、目的寄りなら『どうやって？』、具体例寄りなら『なんのために？』を優先してください。\n")
-	builder.WriteString("候補:\n")
-	for _, candidate := range candidates {
-		builder.WriteString("- " + candidate + "\n")
-	}
-	builder.WriteString("\n")
+	builder.WriteString("あなたは目標達成のための思考を促す質問を作るアシスタントです。\n")
+	builder.WriteString("以下の条件を満たす質問を1つだけ出力してください。\n")
+	builder.WriteString("- 日本語で、30字以内\n")
+	builder.WriteString("- 1文で、疑問符「？」で終える\n")
+	builder.WriteString("- 端的で自然な質問\n")
+	builder.WriteString("- 親ノードと同じ内容を聞かない\n")
+	builder.WriteString("- 兄弟ノードと同じ質問は避ける\n")
+	builder.WriteString("- 親が十分具体的なら、具体化を求める質問は避ける\n")
+	builder.WriteString("- 余計な説明や記号は出力しない\n\n")
 	builder.WriteString("親ノード:\n")
 	builder.WriteString(formatNodeLine(parent, edgeByChild[parent.ID]))
 	builder.WriteString("\n\n")
@@ -207,6 +216,63 @@ func buildQuestionPrompt(
 		for _, node := range siblings {
 			builder.WriteString("- " + formatNodeLine(node, edgeByChild[node.ID]))
 			builder.WriteString("\n")
+		}
+	}
+	builder.WriteString("\n")
+	builder.WriteString("兄弟ノードの質問一覧:\n")
+	if len(siblings) == 0 {
+		builder.WriteString("- なし\n")
+	} else {
+		for _, node := range siblings {
+			if node.Question == nil || strings.TrimSpace(*node.Question) == "" {
+				continue
+			}
+			builder.WriteString("- " + strings.TrimSpace(*node.Question) + "\n")
+		}
+	}
+	return builder.String()
+}
+
+func buildQuestionRepairPrompt(
+	raw string,
+	parent model.Node,
+	ancestors []model.Node,
+	siblings []model.Node,
+	edgeByChild map[uuid.UUID]model.Edge,
+) string {
+	var builder strings.Builder
+	builder.WriteString("次の質問文を条件に合うように修正してください。\n")
+	builder.WriteString("条件:\n")
+	builder.WriteString("- 日本語で、30字以内\n")
+	builder.WriteString("- 1文で、疑問符「？」で終える\n")
+	builder.WriteString("- 親ノードと同じ内容を聞かない\n")
+	builder.WriteString("- 兄弟ノードと同じ質問は避ける\n")
+	builder.WriteString("- 親が十分具体的なら、具体化を求める質問は避ける\n")
+	builder.WriteString("- 余計な説明や記号は出力しない\n\n")
+	builder.WriteString("元の質問:\n")
+	builder.WriteString(raw + "\n\n")
+	builder.WriteString("親ノード:\n")
+	builder.WriteString(formatNodeLine(parent, edgeByChild[parent.ID]))
+	builder.WriteString("\n\n")
+	builder.WriteString("祖先ノード（親を除く、近い順）:\n")
+	if len(ancestors) == 0 {
+		builder.WriteString("- なし\n")
+	} else {
+		for _, node := range ancestors {
+			builder.WriteString("- " + formatNodeLine(node, edgeByChild[node.ID]))
+			builder.WriteString("\n")
+		}
+	}
+	builder.WriteString("\n")
+	builder.WriteString("兄弟ノードの質問一覧:\n")
+	if len(siblings) == 0 {
+		builder.WriteString("- なし\n")
+	} else {
+		for _, node := range siblings {
+			if node.Question == nil || strings.TrimSpace(*node.Question) == "" {
+				continue
+			}
+			builder.WriteString("- " + strings.TrimSpace(*node.Question) + "\n")
 		}
 	}
 	return builder.String()
@@ -230,78 +296,155 @@ func formatNodeLine(node model.Node, edge model.Edge) string {
 	return fmt.Sprintf("内容: %s%s", content, relationInfo)
 }
 
-func fallbackQuestionSelection(candidates []string, parent *model.Node, siblings []model.Node) string {
-	if len(candidates) == 0 {
-		return "具体的には？"
-	}
-	if parent != nil {
-		content := strings.TrimSpace(parent.Content)
-		if content != "" {
-			if containsAny(content, []string{"目的", "理由", "ため", "狙い"}) {
-				return pickLeastUsed(candidates, siblings, "どうやって？")
-			}
-			if containsAny(content, []string{"方法", "やり方", "手段", "手順", "どうやって"}) {
-				return pickLeastUsed(candidates, siblings, "具体的には？")
-			}
-			if containsAny(content, []string{"具体", "例えば", "例", "ケース"}) {
-				return pickLeastUsed(candidates, siblings, "なんのために？")
-			}
-		}
-	}
-	return pickLeastUsed(candidates, siblings, "具体的には？")
-}
-
-func enforceQuestionDiversity(selected string, candidates []string, siblings []model.Node) string {
-	if selected == "" {
-		return pickLeastUsed(candidates, siblings, "具体的には？")
-	}
-	if !isInCandidates(selected, candidates) {
-		return pickLeastUsed(candidates, siblings, "具体的には？")
-	}
-	return pickLeastUsed(candidates, siblings, selected)
-}
-
-func pickLeastUsed(candidates []string, siblings []model.Node, preferred string) string {
-	if len(candidates) == 0 {
-		return "具体的には？"
-	}
-	counts := make(map[string]int, len(candidates))
-	for _, c := range candidates {
-		counts[c] = 0
-	}
+func fallbackQuestionText(parent *model.Node, ancestors []model.Node, siblings []model.Node) string {
+	used := make(map[string]struct{}, len(siblings))
 	for _, node := range siblings {
 		if node.Question == nil {
 			continue
 		}
-		question := strings.TrimSpace(*node.Question)
-		if _, ok := counts[question]; ok {
-			counts[question]++
+		used[strings.TrimSpace(*node.Question)] = struct{}{}
+	}
+
+	focus := "general"
+	if parent != nil && parentSeemsConcrete(parent.Content) {
+		focus = "purpose"
+	}
+
+	candidates := fallbackCandidatesByFocus(focus)
+	filtered := filterUnused(candidates, used)
+	if len(filtered) == 0 {
+		filtered = candidates
+	}
+	if len(filtered) == 0 {
+		return "その目的は何ですか？"
+	}
+
+	seed := ""
+	if parent != nil {
+		seed = parent.Content
+	}
+	index := hashIndex(seed, len(filtered))
+	question := filtered[index]
+	if parent != nil && parentSeemsConcrete(parent.Content) && isConcreteProbe(question) {
+		for _, candidate := range filtered {
+			if !isConcreteProbe(candidate) {
+				return candidate
+			}
 		}
 	}
-	minCount := int(^uint(0) >> 1)
-	for _, c := range candidates {
-		if counts[c] < minCount {
-			minCount = counts[c]
-		}
-	}
-	var leastUsed []string
-	for _, c := range candidates {
-		if counts[c] == minCount {
-			leastUsed = append(leastUsed, c)
-		}
-	}
-	if isInCandidates(preferred, leastUsed) {
-		return preferred
-	}
-	if len(leastUsed) > 0 {
-		return leastUsed[0]
-	}
-	return candidates[0]
+	return question
 }
 
-func isInCandidates(value string, candidates []string) bool {
-	for _, c := range candidates {
-		if c == value {
+func normalizeQuestion(text string) string {
+	question := strings.TrimSpace(text)
+	if question == "" {
+		return ""
+	}
+	question = strings.Split(question, "\n")[0]
+	question = strings.TrimSpace(question)
+	question = strings.Trim(question, "「」\"'")
+	question = strings.ReplaceAll(question, "?", "？")
+	if !strings.HasSuffix(question, "？") {
+		question += "？"
+	}
+	return trimToMaxRunes(question, 30)
+}
+
+func trimToMaxRunes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	trimmed := string(runes[:limit])
+	if !strings.HasSuffix(trimmed, "？") {
+		trimmed = strings.TrimRight(trimmed, "？")
+		if len([]rune(trimmed)) >= limit {
+			trimmed = string([]rune(trimmed)[:limit-1])
+		}
+		trimmed += "？"
+	}
+	return trimmed
+}
+
+func isQuestionUsable(question string, parent model.Node, ancestors []model.Node, siblings []model.Node) bool {
+	trimmed := strings.TrimSpace(question)
+	if trimmed == "" {
+		return false
+	}
+	if len([]rune(trimmed)) > 30 {
+		return false
+	}
+	if !strings.HasSuffix(trimmed, "？") {
+		return false
+	}
+	if isDuplicateQuestion(trimmed, siblings) {
+		return false
+	}
+	if parentSeemsConcrete(parent.Content) && isConcreteProbe(trimmed) {
+		return false
+	}
+	if isOverlappingContent(trimmed, parent, ancestors) {
+		return false
+	}
+	return true
+}
+
+func isDuplicateQuestion(question string, siblings []model.Node) bool {
+	for _, node := range siblings {
+		if node.Question == nil {
+			continue
+		}
+		if strings.TrimSpace(*node.Question) == question {
+			return true
+		}
+	}
+	return false
+}
+
+func parentSeemsConcrete(content string) bool {
+	text := strings.TrimSpace(content)
+	if text == "" {
+		return false
+	}
+	if containsAny(text, []string{"具体", "例", "例えば", "ケース", "手順", "方法", "やり方"}) {
+		return true
+	}
+	for _, r := range text {
+		if r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	if containsAny(text, []string{"毎日", "毎週", "毎月", "週", "回", "時間", "分", "朝", "夜", "午前", "午後", "km", "kg"}) {
+		return true
+	}
+	return false
+}
+
+func isConcreteProbe(question string) bool {
+	return containsAny(question, []string{"具体", "詳細", "どのように", "どんな手順"})
+}
+
+func isOverlappingContent(question string, parent model.Node, ancestors []model.Node) bool {
+	questionText := normalizePlainText(question)
+	if questionText == "" {
+		return false
+	}
+	content := normalizePlainText(parent.Content)
+	if content == "" {
+		return false
+	}
+	if questionText == content {
+		return true
+	}
+	for _, node := range ancestors {
+		ancestorContent := normalizePlainText(node.Content)
+		if ancestorContent == "" {
+			continue
+		}
+		if questionText == ancestorContent {
 			return true
 		}
 	}
@@ -315,4 +458,56 @@ func containsAny(content string, keywords []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizePlainText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.TrimSuffix(trimmed, "？")
+	trimmed = strings.TrimSuffix(trimmed, "?")
+	return strings.TrimSpace(trimmed)
+}
+
+func fallbackCandidatesByFocus(focus string) []string {
+	switch focus {
+	case "purpose":
+		return []string{
+			"この目標の目的は？",
+			"得たい成果は何ですか？",
+			"なぜそれをやりたい？",
+			"成功の基準は？",
+		}
+	default:
+		return []string{
+			"最初にやる一歩は？",
+			"進め方の工夫は？",
+			"どこから始めますか？",
+			"障害になりそうな点は？",
+		}
+	}
+}
+
+func filterUnused(candidates []string, used map[string]struct{}) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	var filtered []string
+	for _, candidate := range candidates {
+		if _, ok := used[candidate]; ok {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
+}
+
+func hashIndex(seed string, modulo int) int {
+	if modulo <= 0 {
+		return 0
+	}
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(seed))
+	return int(hasher.Sum32()) % modulo
 }
