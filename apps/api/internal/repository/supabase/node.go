@@ -20,14 +20,14 @@ func NewNodeRepository(db repository.DBInterface) repository.NodeRepository {
 	return &nodeRepository{db: db}
 }
 
-func (r *nodeRepository) Create(ctx context.Context, projectID uuid.UUID, content string) (*model.Node, error) {
+func (r *nodeRepository) Create(ctx context.Context, projectID uuid.UUID, content string, question *string) (*model.Node, error) {
 	var node model.Node
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO nodes (project_id, content)
-		VALUES ($1, $2)
-		RETURNING id, project_id, content, created_at, updated_at, deleted_at
-	`, projectID, content).Scan(
-		&node.ID, &node.ProjectID, &node.Content,
+		INSERT INTO nodes (project_id, content, question)
+		VALUES ($1, $2, $3)
+		RETURNING id, project_id, content, question, created_at, updated_at, deleted_at
+	`, projectID, content, question).Scan(
+		&node.ID, &node.ProjectID, &node.Content, &node.Question,
 		&node.CreatedAt, &node.UpdatedAt, &node.DeletedAt,
 	)
 	if err != nil {
@@ -39,11 +39,11 @@ func (r *nodeRepository) Create(ctx context.Context, projectID uuid.UUID, conten
 func (r *nodeRepository) GetByID(ctx context.Context, nodeID uuid.UUID) (*model.Node, error) {
 	var node model.Node
 	err := r.db.QueryRow(ctx, `
-		SELECT id, project_id, content, created_at, updated_at, deleted_at
+		SELECT id, project_id, content, question, created_at, updated_at, deleted_at
 		FROM nodes
 		WHERE id = $1 AND deleted_at IS NULL
 	`, nodeID).Scan(
-		&node.ID, &node.ProjectID, &node.Content,
+		&node.ID, &node.ProjectID, &node.Content, &node.Question,
 		&node.CreatedAt, &node.UpdatedAt, &node.DeletedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -68,7 +68,7 @@ func (r *nodeRepository) Update(ctx context.Context, nodeID uuid.UUID, content s
 
 func (r *nodeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Node, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, project_id, content, created_at, updated_at, deleted_at
+		SELECT id, project_id, content, question, created_at, updated_at, deleted_at
 		FROM nodes
 		WHERE project_id = $1 AND deleted_at IS NULL
 	`, projectID)
@@ -80,7 +80,7 @@ func (r *nodeRepository) ListByProjectID(ctx context.Context, projectID uuid.UUI
 	var nodes []model.Node
 	for rows.Next() {
 		var n model.Node
-		if err := rows.Scan(&n.ID, &n.ProjectID, &n.Content,
+		if err := rows.Scan(&n.ID, &n.ProjectID, &n.Content, &n.Question,
 			&n.CreatedAt, &n.UpdatedAt, &n.DeletedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan node: %w", err)
 		}

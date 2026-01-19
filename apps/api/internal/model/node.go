@@ -10,6 +10,7 @@ type Node struct {
 	ID        uuid.UUID  `json:"id"`
 	ProjectID uuid.UUID  `json:"project_id"`
 	Content   string     `json:"content"`
+	Question  *string    `json:"question,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`

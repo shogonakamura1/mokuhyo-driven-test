@@ -12,6 +12,7 @@ export type Node = {
   id: string
   project_id: string
   content: string
+  question?: string
   created_at: string
   updated_at: string
   deleted_at?: string

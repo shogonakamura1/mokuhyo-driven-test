@@ -143,6 +143,14 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
   const renderNode = useCallback((node: Node, parentNodeId: string | null) => { // ノードを再帰的に描画する関数（メモ化）
     const children = treeStructure.childrenMap.get(node.id) || [] // 子ノードを取得
     const edge = edges.find(e => e.child_node_id === node.id) // このノードへのエッジを取得
+    const questionLabel = node.question?.trim() // AIが選んだ質問ラベル
+    const edgeLabel = questionLabel
+      ? questionLabel
+      : edge?.relation === 'custom' && edge.relation_label
+      ? edge.relation_label
+      : edge?.relation === 'neutral'
+      ? ''
+      : edge?.relation // AI質問がない場合は既存の関係ラベルを使う
     const isSelected = selectedNodeId === node.id // 選択されているかどうか
     const isEditing = editingNodeId === node.id // 編集中かどうか
 
@@ -150,14 +158,10 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
       <div key={node.id} className="flex items-start gap-6 mb-2"> {/* 横並びレイアウト、上揃え、間隔6、下マージン2 */}
         <div className="flex items-center gap-2"> {/* ノードとラベルを横並び、中央揃え、間隔2 */}
           {/* エッジが存在する場合、関係ラベルを表示 */}
-          {edge && (
+          {edge && edgeLabel && (
             <span className="text-xs text-gray-500 mt-2"> {/* 関係ラベルを表示 */}
               {/* カスタム関係でラベルがある場合はカスタムラベル、neutral関係の場合は何も表示せず、それ以外は関係タイプを表示 */}
-              {edge.relation === 'custom' && edge.relation_label
-                ? edge.relation_label
-                : edge.relation === 'neutral'
-                ? ''
-                : edge.relation}
+              {edgeLabel}
             </span>
           )}
           <NodeCard // ノードカードコンポーネント

@@ -30,7 +30,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID uuid.UUID, re
 	}
 
 	// Create initial root node
-	initialNode, err := s.nodeRepo.Create(ctx, project.ID, req.Title)
+	initialNode, err := s.nodeRepo.Create(ctx, project.ID, req.Title, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create initial node: %w", err)
 	}

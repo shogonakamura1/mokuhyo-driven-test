@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/mokuhyo-driven-test/api/internal/ai"
 	"github.com/mokuhyo-driven-test/api/internal/handler"
 	"github.com/mokuhyo-driven-test/api/internal/repository"
 	postgresRepo "github.com/mokuhyo-driven-test/api/internal/repository/postgres"
@@ -99,7 +101,23 @@ func main() {
 	// Services
 	authService := service.NewAuthService(userRepo)
 	projectService := service.NewProjectService(projectRepo, nodeRepo, edgeRepo)
-	nodeService := service.NewNodeService(nodeRepo, edgeRepo)
+
+	var questionSelector ai.QuestionSelector
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	geminiModel := os.Getenv("GEMINI_MODEL")
+	if geminiAPIKey != "" {
+		selector, err := ai.NewGeminiQuestionSelector(context.Background(), geminiAPIKey, geminiModel)
+		if err != nil {
+			log.Printf("Gemini client init failed: %v", err)
+		} else {
+			questionSelector = selector
+			defer selector.Close()
+		}
+	} else {
+		log.Println("GEMINI_API_KEY is not set, using fallback question selection")
+	}
+
+	nodeService := service.NewNodeService(nodeRepo, edgeRepo, questionSelector)
 	edgeService := service.NewEdgeService(edgeRepo)
 	settingsService := service.NewSettingsService(settingsRepo)
 

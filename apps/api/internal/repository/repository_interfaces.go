@@ -27,7 +27,7 @@ type ProjectRepository interface {
 
 // NodeRepository はノードリポジトリのインターフェースです
 type NodeRepository interface {
-	Create(ctx context.Context, projectID uuid.UUID, content string) (*model.Node, error)
+	Create(ctx context.Context, projectID uuid.UUID, content string, question *string) (*model.Node, error)
 	GetByID(ctx context.Context, nodeID uuid.UUID) (*model.Node, error)
 	Update(ctx context.Context, nodeID uuid.UUID, content string) error
 	ListByProjectID(ctx context.Context, projectID uuid.UUID) ([]model.Node, error)
