@@ -141,8 +141,8 @@ export default function ProjectPage() {
       />
       <div className="flex-1 overflow-auto">
         <TreeCanvas
-          nodes={tree.nodes}
-          edges={tree.edges}
+          nodes={tree.nodes ?? []}
+          edges={tree.edges ?? []}
           selectedNodeId={selectedNodeId}
           editingNodeId={editingNodeId}
           onSelectNode={setSelectedNodeId}

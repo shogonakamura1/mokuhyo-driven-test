@@ -83,6 +83,14 @@ func (s *ProjectService) GetTree(ctx context.Context, projectID uuid.UUID) (*mod
 		return nil, err
 	}
 
+	// Ensure JSON returns [] instead of null for empty lists
+	if nodes == nil {
+		nodes = []model.Node{}
+	}
+	if edges == nil {
+		edges = []model.Edge{}
+	}
+
 	return &model.TreeResponse{
 		Project: *project,
 		Nodes:   nodes,
