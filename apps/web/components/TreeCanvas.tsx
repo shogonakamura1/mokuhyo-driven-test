@@ -1,6 +1,6 @@
 'use client' // Next.jsのクライアントコンポーネントであることを示す
 
-import { useCallback, useMemo } from 'react' // Reactのフックをインポート
+import { useCallback, useId, useMemo } from 'react' // Reactのフックをインポート
 import NodeCard from './NodeCard' // ノードカードコンポーネントをインポート
 import type { Node, Edge, RelationType } from '@/types' // 型定義をインポート
 
@@ -35,6 +35,7 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
   onNodeDelete, // ノード削除コールバックを受け取る
   onEdgeUpdate, // エッジ更新コールバックを受け取る
 }: TreeCanvasProps) {
+  const markerBaseId = useId().replace(/:/g, '') // SVG marker idの衝突を避ける（DOM全体で一意にする）
 
   // Build tree structure
   const treeStructure = useMemo(() => { // ツリー構造をメモ化（nodes/edgesが変わった時のみ再計算）
@@ -79,7 +80,16 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
     onSetEditingNodeId(null) // 編集モードを解除
   }
 
-  const renderChildConnector = (isLastSibling: boolean) => ( // 子ノードへの接続線を描画する関数
+  const renderChildConnector = ( // 子ノードへの接続線を描画する関数
+    isLastSibling: boolean,
+    isFirstSibling: boolean,
+    suffix: string
+  ) => {
+    const markerId = `arrow-${markerBaseId}-${suffix}`
+    const connectorPath = isFirstSibling
+      ? 'M0 12 H24'
+      : 'M0 0 V12 Q0 12 12 12 H24'
+    return (
     <div className="relative w-6 flex-shrink-0"> {/* 相対配置で幅6のコンテナ */}
       <span className="absolute left-1/2 top-0 bottom-1/2 w-px bg-gray-300 -translate-x-1/2" /> {/* 上から中央までの縦線 */}
       {/* 最後の兄弟ノードでない場合、中央から下までの縦線を表示 */}
@@ -87,15 +97,37 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
         <span className="absolute left-1/2 top-1/2 bottom-0 w-px bg-gray-300 -translate-x-1/2" />
       )}
       <svg // SVG要素で曲線を描画
-        className="absolute left-1/2 top-1/2 -translate-y-1/2" // 中央に配置
-        width="12" // SVGの幅
-        height="12" // SVGの高さ
-        viewBox="0 0 12 12" // ビューボックス
+        className="absolute left-1/2 top-1/2 -translate-y-1/2 overflow-visible" // 中央に配置
+        width="24" // SVGの幅
+        height="24" // SVGの高さ
+        viewBox="0 0 24 24" // ビューボックス
       >
-        <path d="M0 0 V6 Q0 6 6 6 H12" stroke="#D1D5DB" strokeWidth="1" fill="none" /> {/* 縦線→曲線→横線のパス */}
+        <defs>
+          <marker
+            id={markerId}
+            viewBox="0 0 10 10"
+            markerWidth="6"
+            markerHeight="6"
+            refX="10"
+            refY="5"
+            orient="auto">
+            {/* 先端が終点に一致する矢印（三角形） */}
+            <path d="M0 0 L10 5 L0 10 Z" fill="#D1D5DB" />
+          </marker>
+        </defs>
+        <path
+          d={connectorPath}
+          fill="none"
+          stroke="#D1D5DB"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          markerEnd={`url(#${markerId})`}
+        />
       </svg>
     </div>
   )
+  }
 
   const handleKeyDown = async ( // キーボード入力時のハンドラ
     e: React.KeyboardEvent, // キーボードイベント
@@ -200,10 +232,11 @@ export default function TreeCanvas({ // TreeCanvasコンポーネントのエク
           <div className="flex flex-col gap-2"> {/* 子ノードを縦並び、間隔2 */}
             {/* 各子ノードを処理 */}
             {children.map(({ node: childNode }, index) => {
+              const isFirstSibling = index === 0 // 一番上の兄弟かどうか
               const isLastSibling = index === children.length - 1 // 最後の兄弟かどうか
               return (
                 <div key={childNode.id} className="flex items-center gap-2"> {/* 接続線とノードを横並び、中央揃え、間隔2 */}
-                  {renderChildConnector(isLastSibling)} {/* 接続線を描画 */}
+                  {renderChildConnector(isLastSibling, isFirstSibling, childNode.id)} {/* 接続線を描画 */}
                   {renderNode(childNode, node.id)} {/* 子ノードを再帰的に描画 */}
                 </div>
               )
